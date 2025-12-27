@@ -152,6 +152,9 @@ def usage():
         "  l, -l, --list                                       -- List items.\n"
         "  h, -h, --help                                       -- Help.\n"
         "  v, -v, --version                                    -- Version.\n"
+        f"Config: {config_location / config_name}\n"
+        "        Values: color=True, detail_mode=True, autosort=True, week_start_day=Mon\n"
+        f"Data:   {datafile_location / datafile_json}\n"
     )
 
 if __name__ == '__main__':
