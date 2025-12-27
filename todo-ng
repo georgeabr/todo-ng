@@ -3,18 +3,17 @@
 
 import os
 import sys
-import pickle
+import json
 import re
-from math import ceil
-from enum import IntEnum
 from pathlib import Path
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 from configparser import ConfigParser
 
-config_location = str(Path.home()) + '/.config/todo-ng/'
-datafile_location = str(Path.home()) + '/.local/share/todo-ng/'
+# Robust, cross‑platform path handling
+config_location = Path.home() / '.config' / 'todo-ng'
+datafile_location = Path.home() / '.local' / 'share' / 'todo-ng'
 config_name = 'config'
-datafile_name = 'todo.dat'
+datafile_json = 'todo.json'
 due_string = 'Already due'
 
 index_color = '\x1b[36m{}\x1b[0m'
@@ -25,12 +24,9 @@ tomorrow_color = '\x1b[36m{}\x1b[0m'
 
 esc_seq_reg = re.compile(r'\x1b[^m]*m')
 
-
-class Weekday(IntEnum):
-    MONDAY = 0
-    SATURDAY = 5
-    SUNDAY = 6
-
+WEEKDAY_MAP = {
+    'mon': 0, 'tue': 1, 'wed': 2, 'thu': 3, 'fri': 4, 'sat': 5, 'sun': 6,
+}
 
 class TodoItem:
     def __init__(self, title: str, exp_date: datetime):
@@ -41,49 +37,41 @@ class TodoItem:
     def days_left(self):
         if self.exp_date is None:
             return 999
-        return (self.exp_date - datetime.today()).days + 1
+        return (self.exp_date.date() - date.today()).days
 
-    def __eq__(self, other):
-        return isinstance(other, TodoItem) and \
-               self.title == other.title and \
-               self.exp_date == other.exp_date
+    def to_dict(self):
+        return {
+            'title': self.title,
+            'exp_date': self.exp_date.strftime("%Y/%m/%d") if self.exp_date else None
+        }
 
     def __str__(self):
         if self.exp_date is None:
             return self.title
-
         days_left = self.days_left
-
         if days_left == 0:
             return f"{self.title} (Due today)"
         elif days_left == 1:
             return f"{self.title} (Due tomorrow)"
         elif days_left > 1:
-            output = f"{self.title} ("
-
             if config['PY-TODO'].getboolean('detail_mode', fallback=False):
-                if config['PY-TODO'].get('week_start_day', 'Sun').lower() == 'mon':
-                    last_weekday = Weekday.SUNDAY
+                week_start_str = config['PY-TODO'].get('week_start_day', 'Mon').lower()
+                week_start_idx = WEEKDAY_MAP.get(week_start_str, 0)
+                today = date.today()
+                offset = (today.weekday() - week_start_idx) % 7
+                this_week_start = today - timedelta(days=offset)
+                next_week_start = this_week_start + timedelta(days=7)
+                next_next_week_start = this_week_start + timedelta(days=14)
+                d = self.exp_date.date()
+                if this_week_start <= d < next_week_start:
+                    return f"{self.title} (Due in {days_left} days, this {self.exp_date.strftime('%A')})"
+                elif next_week_start <= d < next_next_week_start:
+                    return f"{self.title} (Due in {days_left} days, next {self.exp_date.strftime('%A')})"
                 else:
-                    last_weekday = Weekday.SATURDAY
-
-                days_to_next_week = last_weekday - datetime.today().weekday()
-                weeks_left = ceil((days_left - days_to_next_week) / 7)
-
-                if weeks_left in (0, 1):
-                    return (output +
-                            f"Due in {days_left} days, "
-                            f"{'this' if weeks_left == 0 else 'next'} "
-                            f"{self.exp_date.strftime('%A')})")
-
-                return (output +
-                        f"Due in {days_left} days, on "
-                        f"{self.exp_date.strftime('%a %e %b')})")
-
+                    return f"{self.title} (Due in {days_left} days, on {self.exp_date.strftime('%a %e %b')})"
             return f"{self.title} (In {days_left} days)"
         else:
-            return f"{self.title}\n\t({due_string})"
-
+            return f"{self.title}\n    ({due_string})"
 
 def maybe_color_str(message, color_fstr, predicate=lambda: True):
     if config['PY-TODO'].getboolean('color', fallback=False):
@@ -91,165 +79,98 @@ def maybe_color_str(message, color_fstr, predicate=lambda: True):
         return color_fstr.format(stripped) if predicate() else message
     return message
 
-
 def parse_date_str(exp_date_str):
-    if exp_date_str == '':
-        return None
-
+    if not exp_date_str: return None
     if exp_date_str.endswith('d'):
         try:
-            day_count = int(exp_date_str[:-1])
-            return datetime.today() + timedelta(days=day_count)
-        except ValueError:
-            print("Invalid day-count format.")
-            sys.exit(1)
-
+            return datetime.today() + timedelta(days=int(exp_date_str[:-1]))
+        except ValueError: sys.exit("Invalid day-count format.")
     try:
         return datetime.strptime(exp_date_str, "%Y/%m/%d")
-    except ValueError:
-        print("Invalid date format. Use YYYY/MM/DD or <days>d.")
-        sys.exit(1)
-
+    except ValueError: sys.exit("Invalid date format. Use YYYY/MM/DD or <days>d.")
 
 class TodoList:
     def __init__(self):
         self.items = []
 
     def load(self):
-        try:
-            with open(datafile_location + datafile_name, 'rb') as f:
-                self.items = pickle.load(f)
-        except Exception:
-            self.items = []
+        json_path = datafile_location / datafile_json
+        
+        if json_path.exists():
+            try:
+                with open(json_path, 'r') as f:
+                    data = json.load(f)
+                    self.items = [TodoItem(d['title'], parse_date_str(d['exp_date'])) for d in data]
+            except Exception: 
+                self.items = []
 
     def save(self):
-        with open(datafile_location + datafile_name, 'wb') as f:
-            pickle.dump(self.items, f)
-
-    def add(self, title, exp_date):
-        self.items.append(TodoItem(title, exp_date))
-
-    def remove(self, indices):
-        for idx in sorted(indices, reverse=True):
-            if 1 <= idx <= len(self.items):
-                del self.items[idx - 1]
-            else:
-                print(f"Index {idx} does not exist.")
-
-    def move(self, old_index, new_index):
-        if not (1 <= old_index <= len(self.items)):
-            print("Source index does not exist.")
-            return
-        if not (1 <= new_index <= len(self.items) + 1):
-            print("Destination index out of range.")
-            return
-
-        item = self.items.pop(old_index - 1)
-        self.items.insert(new_index - 1, item)
-
-    def sort(self):
-        self.items.sort(key=lambda i: i.days_left)
+        with open(datafile_location / datafile_json, 'w') as f:
+            json.dump([item.to_dict() for item in self.items], f, indent=4)
 
     def list(self):
-        if not self.items:
+        display_items = self.items
+        if config['PY-TODO'].getboolean('autosort', fallback=False):
+            display_items = sorted(self.items, key=lambda i: i.days_left)
+
+        if not display_items:
             print("No items left on the reminder.")
             return
 
         now = datetime.now()
-        dt_string = now.strftime("%a, %e %b %Y, %k:%M")
-
-        colored_date = maybe_color_str(dt_string, date_color)
-
+        colored_date = maybe_color_str(now.strftime("%a, %e %b %Y, %k:%M"), date_color)
         print(f"\nToday is {colored_date}.")
+        print(f"You have {maybe_color_str(f'[{len(display_items)}]', index_color)} item{'s' if len(display_items) != 1 else ''} left.")
 
-        count_str = f"[{len(self.items)}]"
-        colored_count = maybe_color_str(count_str, index_color)
-
-        print(f"You have {colored_count} item{'s' if len(self.items) != 1 else ''} left on the reminder.")
-
-        for idx, item in enumerate(self.items, start=1):
+        for idx, item in enumerate(display_items, start=1):
             item_str = str(item)
             idx_str = maybe_color_str(f"{idx}) ", index_color)
-
             if '(' in item_str:
-                date = item_str[item_str.index('('):]
-
-                date = maybe_color_str(date, due_color, lambda: due_string in date)
-                date = maybe_color_str(date, date_color, lambda: due_string not in date)
-                date = maybe_color_str(date, today_color, lambda: "today" in date)
-                date = maybe_color_str(date, tomorrow_color, lambda: "tomorrow" in date)
-
-                print(f"  {idx_str}{item.title}\n\t{date}")
+                date_part = item_str[item_str.index('('):]
+                date_part = maybe_color_str(date_part, due_color, lambda: due_string in date_part)
+                date_part = maybe_color_str(date_part, date_color, lambda: due_string not in date_part)
+                date_part = maybe_color_str(date_part, today_color, lambda: "today" in date_part)
+                date_part = maybe_color_str(date_part, tomorrow_color, lambda: "tomorrow" in date_part)
+                print(f"  {idx_str}{item.title}\n    {date_part}")
             else:
                 print(f"  {idx_str}{item_str}")
 
-
 def take_input(title_pos, date_pos, default_title=None):
-    if default_title:
-        title = sys.argv[title_pos] if len(sys.argv) > title_pos else \
-                input(f"Title ({default_title}): ")
-    else:
-        title = sys.argv[title_pos] if len(sys.argv) > title_pos else \
-                input("Title: ")
-
-    exp_date_str = sys.argv[date_pos] if len(sys.argv) > date_pos else \
-                   input("Due date (YYYY/MM/DD or <days>d) (Optional): ")
-
+    title = sys.argv[title_pos] if len(sys.argv) > title_pos else input(f"Title ({default_title}): " if default_title else "Title: ")
+    exp_date_str = sys.argv[date_pos] if len(sys.argv) > date_pos else input("Due date (YYYY/MM/DD or <days>d): ")
     return title if title else default_title, exp_date_str
-
 
 def usage():
     return (
-        "\nUsage: " + sys.argv[0] + " <argument>\n"
-        "\ta -a --add add                              -- Add a new item.\n"
-        "\ta -a --add <title> <date or days>           -- Add a new item with a title and due date.\n"
-        "\te -e --edit <index>                         -- Edit an item.\n"
-        "\te -e --edit <index> <title> <date or days>  -- Edit with provided values.\n"
-        "\tm -m --move <index> <new index>             -- Move an item.\n"
-        "\tr -r --remove <indices...>                  -- Remove items.\n"
-        "\tl -l --list ls                              -- List items.\n"
-        "\ts -s --sort                                 -- Sort items.\n"
-        "\t-org --orgfile <filename>                   -- Import org todos.\n"
-        "\n"
-        "\th -h --help                                 -- Help.\n"
-        "\tv -v --version                              -- Version.\n"
+        f"\nUsage: {sys.argv[0]} <argument>\n\n"
+        "  a, -a, --add <title> <date or days as YYYY/MM/DD>   -- Add a new item.\n"
+        "                                                      Ex: ./todo-ng -a \"Buy milk\" 10d\n"
+        "                                                      Ex: ./todo-ng -a \"Buy milk\" 2025/12/30\n"
+        "  e, -e, --edit <index> <title> <date or days>        -- Edit an item (uses displayed index).\n"
+        "  m, -m, --move <index> <new index>                   -- Move an item (changes disk order).\n"
+        "  r, -r, --remove <indices...>                        -- Remove items (uses displayed index).\n"
+        "  l, -l, --list                                       -- List items.\n"
+        "  h, -h, --help                                       -- Help.\n"
+        "  v, -v, --version                                    -- Version.\n"
     )
-
-
-def print_version():
-    print(
-        "\ntodo-ng 1.0.1 - with readline\n"
-        "Copyleft George Abraham\n"
-        "Based on py-todo by Marco Wang\n"
-        "For license, see https://github.com/georgeabr/todo-ng\n"
-    )
-
 
 if __name__ == '__main__':
-    Path(config_location).mkdir(parents=True, exist_ok=True)
-    Path(datafile_location).mkdir(parents=True, exist_ok=True)
-
-    global config
+    config_location.mkdir(parents=True, exist_ok=True)
+    datafile_location.mkdir(parents=True, exist_ok=True)
     config = ConfigParser()
-    config['PY-TODO'] = {
-        'color': True,
-        'detail_mode': True,
-        'week_start_day': 'Mon'
-    }
-
-    cfg_path = os.path.join(config_location, config_name)
-    if not os.path.isfile(cfg_path):
-        with open(cfg_path, 'w+') as f:
-            config.write(f)
-    else:
-        config.read(cfg_path)
+    config['PY-TODO'] = {'color': True, 'detail_mode': True, 'week_start_day': 'Mon', 'autosort': True}
+    cfg_path = config_location / config_name
+    if not cfg_path.is_file():
+        with open(cfg_path, 'w+') as f: config.write(f)
+    else: config.read(cfg_path)
 
     todo = TodoList()
     todo.load()
 
+    active_items = sorted(todo.items, key=lambda i: i.days_left) if config['PY-TODO'].getboolean('autosort', fallback=False) else todo.items
+
     if len(sys.argv) <= 1:
         todo.list()
-        print()
         sys.exit(0)
 
     cmd = sys.argv[1]
@@ -259,67 +180,55 @@ if __name__ == '__main__':
 
     elif cmd in ['a', 'add', '-a', '--add']:
         try:
-            title, exp_date_str = take_input(2, 3)
-            exp_date = parse_date_str(exp_date_str)
-            todo.add(title, exp_date)
+            title, date_str = take_input(2, 3)
+            todo.items.append(TodoItem(title, parse_date_str(date_str)))
             todo.list()
-            print()
         except KeyboardInterrupt:
-            print()
+            print("\nCancelled.")
             todo.list()
 
     elif cmd in ['r', '-r', '--remove']:
         if len(sys.argv) >= 3:
-            try:
-                indices = list(map(int, sys.argv[2:]))
-                todo.remove(indices)
-                todo.list()
-                print()
-            except ValueError:
-                print("Invalid index.")
-        else:
-            print(usage())
+            to_remove = []
+            for i in sys.argv[2:]:
+                try:
+                    item_to_kill = active_items[int(i)-1]
+                    to_remove.append(item_to_kill)
+                except: print(f"Index {i} invalid.")
+            todo.items = [it for it in todo.items if it not in to_remove]
+            todo.list()
+        else: print(usage())
 
     elif cmd in ['e', '-e', '--edit']:
         if len(sys.argv) >= 3:
             try:
                 idx = int(sys.argv[2])
-                item = todo.items[idx - 1]
-                title, exp_date_str = take_input(3, 4, default_title=item.title)
+                item = active_items[idx-1]
+                title, date_str = take_input(3, 4, item.title)
                 item.title = title
-                item.exp_date = parse_date_str(exp_date_str)
+                item.exp_date = parse_date_str(date_str)
                 todo.list()
-                print()
-            except IndexError:
-                print("Item does not exist.")
             except KeyboardInterrupt:
-                print()
+                print("\nCancelled.")
                 todo.list()
-        else:
-            print(usage())
+            except: 
+                print("Item does not exist.")
+        else: print(usage())
 
     elif cmd in ['m', '-m', '--move']:
         if len(sys.argv) == 4:
             try:
-                old = int(sys.argv[2])
-                new = int(sys.argv[3])
-                todo.move(old, new)
+                old_idx, new_idx = int(sys.argv[2]), int(sys.argv[3])
+                item = active_items.pop(old_idx-1)
+                todo.items.remove(item)
+                todo.items.insert(new_idx-1, item)
                 todo.list()
-            except ValueError:
-                print("Invalid index.")
-        else:
-            print(usage())
-
-    elif cmd in ['s', '-s', '--sort']:
-        todo.sort()
-        todo.list()
+            except: print("Invalid movement.")
+        else: print(usage())
 
     elif cmd in ['v', '-v', '--version']:
-        print_version()
-
+        print("todo-ng 1.1.0")
     else:
         print(usage())
 
     todo.save()
-
-
