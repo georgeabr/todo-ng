@@ -50,10 +50,9 @@ autosort = False
 Reminders data file: ~/.local/share/todo-ng/todo.json
 ```
 
+### Detail Mode
 
 ```
-## Detail Mode
-
   3) Buy CDs                                  # detail_mode = true
     (Due in 2 days, next Tuesday)
   3) Buy CDs                                  # detail_mode = false
