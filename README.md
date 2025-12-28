@@ -1,20 +1,19 @@
 <div align="center">
 <h3>todo-ng</h3>
-<img src="https://github.com/georgeabr/py-todo-ng/blob/master/todo-ng.png">
+<img src="https://github.com/georgeabr/py-todo-ng/blob/master/todo-ng-1.png">
 
 </div>
 
 ## Overview
-A little program to remind you of upcoming events / unfinished tasks.
+A little program to remind you of upcoming events / unfinished tasks.  
+It uses `json` for storing the appointments.  
 
-Put them into `~/.zshrc` or `~/.bashrc` or whatever you want, and it will stop you from
+Add it to `~/.zshrc` or `~/.bashrc` or whatever you want, and it will stop you from
 putting off stuff.
-
-Pickled (i.e., serialized) todo list objects are saved in ~/.local/share/todo-ng/todo.dat by default.
 
 
 ## Dependencies
-* python >=3.5 (sys, re, pickle, pathlib, datetime, readline)
+* python >=3.5 (sys, re, json)
 
 ## Tested Platforms
 * Linux
@@ -28,34 +27,29 @@ $ cd todo-ng && sudo cp todo-ng /usr/bin/todo-ng
 ## Usage
 ```
 Usage: ./todo-ng <argument>
-	a -a --add add                              -- Add a new item.
-	a -a --add <title> <date or days>           -- Add a new item with a title and expiry date provided.
-	e -e --edit <index>                         -- Edit an item.
-	e -e --edit <index> <title> <date or days>  -- Edit an item with a title and expiry date provided.
-	m -m --move <index> <new index>             -- Move an item from index to new index.
-	r -r --remove <indices...>                  -- Remove items by their indices.
-	l -l --list ls                              -- List all items.
-	s -s --sort                                 -- Sort items chronologically.
-	-org --orgfile <filename>                   -- Add org file todos.
 
-	h -h --help                                 -- Display help message.
-	v -v --version                              -- Display version info.
+  a, -a, --add <title> <date or days as YYYY/MM/DD>   -- Add a new item.
+                                                      Ex: ./todo-ng -a "Buy milk" 10d
+                                                      Ex: ./todo-ng -a "Buy milk" 2025/12/30
+  e, -e, --edit <index> <title> <date or days>        -- Edit an item (uses displayed index).
+  m, -m, --move <index> <new index>                   -- Move an item (changes disk order).
+  r, -r, --remove <indices...>                        -- Remove items (uses displayed index).
+  l, -l, --list                                       -- List items.
+  h, -h, --help                                       -- Help.
+  v, -v, --version                                    -- Version.
 
 Use date in format YYYY/MM/DD - 2020/07/05, or <days>d - 3d, for due date of todo item
 Use readline keyboard shortcuts to move around the input buffer
 
 Configuration Options (See ~/.config/todo-ng/config):
-* color = true / false
-* detail_mode = true / false
-Reminders data file: ~/.local/share/todo-ng/todo.dat
+color = False
+detail_mode = True
+week_start_day = Mon
+autosort = False
+
+Reminders data file: ~/.local/share/todo-ng/todo.json
 ```
 
-```
-[PY-TODO]
-color = true / false
-detail_mode = true / false
-week_start_day = Sun
-```
 
 ```
 ## Detail Mode
@@ -66,18 +60,6 @@ Discrete Mathematics Exam (5 days left)                  # detail_mode = false
 ## Author of the original script, on which this fork is based
 Copyright (c) 2017-2018 aesophor
 https://github.com/aesophor/py-todo
-
-## Contributors from original repo:
-Special thanks to all the contributors! (In lexicographical order)
-* [Arsukeey](https://github.com/Arsukeey) - Added Detail Mode (e.g., Next Wednesday)
-* [christophergeiger3](https://github.com/christophergeiger3) - Reformatted code
-* [diplozoon](https://github.com/diplozoon) - Reformatted code
-* [jonaylor89](https://github.com/jonaylor89) - More robust config parsing
-* [luvhalvorson](https://github.com/luvhalvorson) - Updated README.md
-* [MMarinov97](https://github.com/MMarinov97) - Added compatibility with emacs org file
-* [patatman](https://github.com/patatman) - Improved -a --add. Tested py-todo on MacOS
-* [RewoundVHS](https://github.com/RewoundVHS) - AUR Package Maintainer, Color Mode
-* [Steampunkery](https://github.com/Steampunkery) - Added -e --edit, -m --move, refactoring
 
 ## License
 Available under the [MIT License](https://github.com/georgeabr/todo-ng/blob/master/LICENSE)
